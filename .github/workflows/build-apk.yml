@@ -1,0 +1,47 @@
+# Gera automaticamente um APK de debug a cada push.
+# Baixe o APK em: aba Actions > run concluído > Artifacts
+name: Build APK
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Gerar APK de Debug
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # Instala o Gradle 8.9 na VM (não precisa do gradlew/binário wrapper)
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Aceitar licenças do Android SDK
+        run: yes | sdkmanager --licenses > /dev/null || true
+
+      - name: Compilar APK de Debug
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Publicar o APK como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: hand-tracker-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
