@@ -15,36 +15,121 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <TextView
-        android:id="@+id/countText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:shadowColor="#000000"
-        android:shadowDx="2"
-        android:shadowDy="2"
-        android:shadowRadius="8"
-        android:text="0"
-        android:textColor="#FFFFFF"
-        android:textSize="128sp"
-        android:textStyle="bold"
-        app:layout_constraintEnd_toEndOf="parent"
+    <!-- Gradiente escuro no topo para o texto ficar legível -->
+    <View
+        android:id="@+id/topGradient"
+        android:layout_width="match_parent"
+        android:layout_height="280dp"
+        android:background="@drawable/bg_top_gradient"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
+
+    <LinearLayout
+        android:id="@+id/topContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <TextView
+            android:id="@+id/countText"
+            android:layout_width="180dp"
+            android:layout_height="180dp"
+            android:background="@drawable/bg_count_circle"
+            android:elevation="8dp"
+            android:gravity="center"
+            android:text="0"
+            android:textColor="#69F0AE"
+            android:textSize="88sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/countLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:shadowColor="#000000"
+            android:shadowDx="1"
+            android:shadowDy="1"
+            android:shadowRadius="4"
+            android:text="DEDOS LEVANTADOS"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/dotsRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/dotThumb"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_margin="6dp"
+                android:background="@drawable/finger_dot_off" />
+
+            <View
+                android:id="@+id/dotIndex"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_margin="6dp"
+                android:background="@drawable/finger_dot_off" />
+
+            <View
+                android:id="@+id/dotMiddle"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_margin="6dp"
+                android:background="@drawable/finger_dot_off" />
+
+            <View
+                android:id="@+id/dotRing"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_margin="6dp"
+                android:background="@drawable/finger_dot_off" />
+
+            <View
+                android:id="@+id/dotPinky"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_margin="6dp"
+                android:background="@drawable/finger_dot_off" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/dotsCaption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:shadowColor="#000000"
+            android:shadowRadius="4"
+            android:text="Mão principal"
+            android:textColor="#B0FFFFFF"
+            android:textSize="12sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/statusText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="48dp"
-        android:padding="8dp"
+        android:layout_marginBottom="40dp"
+        android:padding="10dp"
         android:shadowColor="#000000"
         android:shadowDx="1"
         android:shadowDy="1"
         android:shadowRadius="4"
         android:text="Iniciando..."
         android:textColor="#FFFFFF"
-        android:textSize="18sp"
+        android:textSize="16sp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />

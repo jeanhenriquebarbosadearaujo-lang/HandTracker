@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.Bundle
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +25,7 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,11 +33,17 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
 import java.util.concurrent.Executors
-import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
  * App que usa a câmera traseira + MediaPipe Hand Landmarker para contar
  * quantos dedos estão levantados (até 2 mãos).
+ *
+ * Melhorias nesta versão:
+ *  - Contagem estável (votação dos últimos frames) sem "piscar".
+ *  - Detecção de dedos mais confiável (polegar incluso).
+ *  - Vibração quando o número muda.
+ *  - UI com badge circular, indicadores por dedo e latência da detecção.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -43,9 +52,20 @@ class MainActivity : AppCompatActivity() {
     private var modelReady = false
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val modelFile by lazy { File(filesDir, "hand_landmarker.task") }
+    private val vibrator by lazy { getSystemService(Vibrator::class.java) }
 
     @Volatile private var imageWidth = 1
     @Volatile private var imageHeight = 1
+
+    // --- Anti-tremor: guarda os últimos frames e vota qual dedo está levantado ---
+    private data class FrameSummary(val hands: List<List<Boolean>>)
+    private val history = ArrayDeque<FrameSummary>()
+    private var displayedCount = -1
+
+    // Os 5 indicadores de dedo na ordem: polegar, indicador, médio, anelar, mínimo
+    private val dots by lazy {
+        listOf(binding.dotThumb, binding.dotIndex, binding.dotMiddle, binding.dotRing, binding.dotPinky)
+    }
 
     private val requestPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -101,7 +121,7 @@ class MainActivity : AppCompatActivity() {
                 .setMinHandDetectionConfidence(0.5f)
                 .setMinHandPresenceConfidence(0.5f)
                 .setMinTrackingConfidence(0.5f)
-                .setResultListener { result, _ -> runOnUiThread { handleResult(result) } }
+                .setResultListener { result, _ -> runOnUiThread { onResult(result) } }
                 .setErrorListener { error ->
                     runOnUiThread {
                         binding.statusText.text = "Erro na detecção: ${error.message}"
@@ -179,52 +199,115 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Recebe o resultado (já na UI thread) e atualiza a contagem na tela. */
-    private fun handleResult(result: HandLandmarkerResult) {
+    /** Recebe o resultado (já na UI thread) e atualiza a tela. */
+    private fun onResult(result: HandLandmarkerResult) {
         binding.overlay.setResults(result, imageWidth, imageHeight)
 
-        val hands = result.landmarks()
-        if (hands.isEmpty()) {
-            binding.countText.text = "0"
-            binding.statusText.text = "Mostre sua mão para a câmera"
+        // Estado bruto (com ruído) de cada dedo de cada mão.
+        val rawHands = result.landmarks().map { raisedBooleans(it) }
+
+        // Suaviza votando nos últimos frames.
+        pushFrame(rawHands)
+        val voted = votedHands()
+        binding.overlay.setRaised(voted)
+
+        val total = voted.sumOf { hand -> hand.count { it } }
+        binding.countText.text = total.toString()
+
+        // Indicadores do primeiro dedo da mão principal.
+        updateDots(voted.firstOrNull())
+
+        val hands = result.landmarks().size
+        val latency = SystemClock.uptimeMillis() - result.timestampMs()
+        binding.statusText.text = if (hands == 0) {
+            "Mostre sua mão para a câmera"
         } else {
-            val count = countRaisedFingers(result)
-            binding.countText.text = count.toString()
-            binding.statusText.text =
-                "${hands.size} mão(s) • $count dedo(s) levantado(s)"
+            "$hands mão(s) detectada(s) • ${latency}ms"
+        }
+
+        // Vibra quando o total muda (exceto na 1ª leitura).
+        if (total != displayedCount) {
+            if (displayedCount != -1) vibrate()
+            displayedCount = total
         }
     }
 
+    // ───────────────────────── Detecção de dedos ─────────────────────────
+
     /**
-     * Conta os dedos levantados.
-     * Para os 4 dedos: a ponta (tip) precisa estar ACIMA da junta do meio (PIP).
-     * Para o polegar: a ponta precisa estar mais "afastada" da base do mínimo
-     * do que a junta IP.
+     * Retorna 5 booleanos: [polegar, indicador, médio, anelar, mínimo].
      *
-     * Índices MediaPipe: 4=polegar, 8=indicador, 12=médio, 16=anelar, 20=mínimo.
+     * 4 dedos: levantados quando a ponta está ACIMA da junta do meio (PIP)
+     *          E mais distante do pulso que a junta (evita contar dedos dobrados).
+     * Polegar: levantado quando a ponta está mais AFASTADA da base do indicador
+     *          (MCP) que a junta IP — funciona independente da mão ser esq/dir.
      */
-    private fun countRaisedFingers(result: HandLandmarkerResult): Int {
-        var total = 0
-        for (hand in result.landmarks()) {
-            if (hand.size < 21) continue
+    private fun raisedBooleans(hand: List<NormalizedLandmark>): List<Boolean> {
+        if (hand.size < 21) return List(5) { false }
+        val wrist = hand[0]
 
-            // (ponta, juntaPIP) dos 4 dedos — y menor = mais alto na imagem
-            val fingers = listOf(
-                8 to 6,   // indicador
-                12 to 10, // médio
-                16 to 14, // anelar
-                20 to 18  // mínimo
-            )
-            for ((tip, pip) in fingers) {
-                if (hand[tip].y() < hand[pip].y()) total++
-            }
-
-            // Polegar: ponta (4) mais distante da base do mínimo (17) que a junta (3)
-            if (abs(hand[4].x() - hand[17].x()) > abs(hand[3].x() - hand[17].x())) {
-                total++
-            }
+        // (ponta, pip, mcp) dos 4 dedos
+        val fingers = listOf(
+            Triple(8, 6, 5),    // indicador
+            Triple(12, 10, 9),  // médio
+            Triple(16, 14, 13), // anelar
+            Triple(20, 18, 17)  // mínimo
+        )
+        val four = fingers.map { (tip, pip, _) ->
+            hand[tip].y() < hand[pip].y() &&
+                dist(hand[tip], wrist) > dist(hand[pip], wrist)
         }
-        return total
+
+        val thumbUp = dist(hand[4], hand[5]) > dist(hand[3], hand[5]) * 1.15f
+        return listOf(thumbUp) + four
+    }
+
+    private fun dist(a: NormalizedLandmark, b: NormalizedLandmark): Float {
+        val dx = a.x() - b.x()
+        val dy = a.y() - b.y()
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    // ───────────────────────── Anti-tremor (smoothing) ─────────────────────────
+
+    private fun pushFrame(hands: List<List<Boolean>>) {
+        history.addLast(FrameSummary(hands))
+        while (history.size > HISTORY_SIZE) history.removeFirst()
+    }
+
+    /** Para cada "slot" de mão, vota cada dedo pela maioria dos últimos frames. */
+    private fun votedHands(): List<List<Boolean>> {
+        if (history.isEmpty()) return emptyList()
+        val maxHands = history.maxOf { it.hands.size }
+        val result = ArrayList<List<Boolean>>()
+        for (h in 0 until maxHands) {
+            val counts = IntArray(5)
+            var present = 0
+            for (frame in history) {
+                if (h < frame.hands.size) {
+                    present++
+                    frame.hands[h].forEachIndexed { i, up -> if (up) counts[i]++ }
+                }
+            }
+            if (present == 0) continue
+            result.add((0 until 5).map { counts[it] * 2 >= present })
+        }
+        return result
+    }
+
+    // ───────────────────────── UI / feedback ─────────────────────────
+
+    private fun updateDots(raised: List<Boolean>?) {
+        for (i in dots.indices) {
+            val on = raised != null && i < raised.size && raised[i]
+            dots[i].setBackgroundResource(
+                if (on) R.drawable.finger_dot_on else R.drawable.finger_dot_off
+            )
+        }
+    }
+
+    private fun vibrate() {
+        vibrator?.vibrate(VibrationEffect.createOneShot(25, VibrationEffect.DEFAULT_AMPLITUDE))
     }
 
     override fun onDestroy() {
@@ -235,5 +318,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "HandTracker"
+        private const val HISTORY_SIZE = 6
     }
 }
