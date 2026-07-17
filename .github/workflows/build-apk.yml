@@ -71,4 +71,3 @@ jobs:
           name: hand-tracker-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
-          
