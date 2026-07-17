@@ -1,0 +1,74 @@
+# Workflow COM DIAGNÓSTICO — quando dá erro, ele cria um passo curto
+# "🩺 Resumo de erros" com SÓ as linhas importantes. Fácil de copiar!
+name: Build APK
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Gerar APK de Debug
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Instala os componentes que MAIS costumam faltar (causa nº 1 de erro)
+      - name: Instalar componentes do SDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # Compila guardando o log. O continue-on-error deixa o próximo passo rodar.
+      - name: Compilar APK de Debug
+        id: build
+        continue-on-error: true
+        run: |
+          set +e
+          gradle assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          STATUS=$?
+          cat build.log
+          exit $STATUS
+
+      # 👇 SE der erro, este passo mostra SÓ as linhas relevantes. Copie ele!
+      - name: "🩺 Resumo de erros (COPIE ESTE PASSO)"
+        if: always() && steps.build.outcome == 'failure'
+        run: |
+          echo "======================================================"
+          echo "  ERROS ENCONTRADOS — copie o texto abaixo"
+          echo "======================================================"
+          grep -nE "FAILURE:|What went wrong|> Task .*FAILED|e: file|error:|Could not (resolve|find)|failed to find|SDK location|Execution failed|Caused by" build.log | head -40
+          echo "======================================================"
+
+      # Faz o job ficar vermelho de verdade
+      - name: Falhar se o build deu erro
+        if: steps.build.outcome == 'failure'
+        run: exit 1
+
+      - name: Publicar o APK como artefato
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: hand-tracker-apk
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+          
