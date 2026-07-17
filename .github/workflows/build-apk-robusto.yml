@@ -1,5 +1,5 @@
-# Gera automaticamente um APK de debug a cada push.
-# Baixe o APK em: aba Actions > run concluído > Artifacts
+# Versão ROBUSTA do workflow — instala explicitamente os componentes
+# do Android SDK que costumam faltar (causa nº 1 de "exit code 1").
 name: Build APK
 
 on:
@@ -24,17 +24,28 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # Instala o Gradle 8.9 na VM (não precisa do gradlew/binário wrapper)
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Já instala o que o projeto precisa
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            platform-tools
+
+      - name: Aceitar licenças do Android SDK
+        run: yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      # Instala o Gradle 8.9 (não precisa do gradlew/binário wrapper)
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Aceitar licenças do Android SDK
-        run: yes | sdkmanager --licenses > /dev/null || true
+      - name: Versões (debug)
+        run: |
+          gradle -v
+          sdkmanager --list_installed 2>/dev/null | head -20
 
       - name: Compilar APK de Debug
         run: gradle assembleDebug --no-daemon --stacktrace
@@ -45,3 +56,4 @@ jobs:
           name: hand-tracker-apk
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
+          
